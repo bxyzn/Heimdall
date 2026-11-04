@@ -758,23 +758,35 @@
                 localStream.getTracks().forEach(t => t.stop());
             }
 
-            try {
-                localStream = await navigator.mediaDevices.getUserMedia({
-                    video: { facingMode: facingMode, width: { ideal: 1920 }, height: { ideal: 1080 } },
-                    audio: false
-                });
+            // Fallback cascade: tries ideal 720p/1080p, falls back to true if rejected
+            const constraintOptions = [
+                { video: { facingMode: facingMode, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false },
+                { video: { facingMode: facingMode }, audio: false },
+                { video: true, audio: false }
+            ];
 
-                if (currentRole === 'camera') {
-                    registerStream('local-cam', localStream);
-                } else if (currentRole === 'standalone') {
-                    registerStream('standalone-cam', localStream);
+            for (const constraints of constraintOptions) {
+                try {
+                    localStream = await navigator.mediaDevices.getUserMedia(constraints);
+                    break; // Successfully captured
+                } catch (err) {
+                    console.warn("Retrying with relaxed camera constraints...", err);
                 }
-
-                startOverlay.classList.add('hidden');
-                if (batterySaverEnabled) resetSleepTimer();
-            } catch (e) {
-                alert("Camera permission denied or camera unavailable.");
             }
+
+            if (!localStream) {
+                alert("Camera error: Unable to initialize any video feed. Check browser permissions.");
+                return;
+            }
+
+            if (currentRole === 'camera') {
+                registerStream('local-cam', localStream);
+            } else if (currentRole === 'standalone') {
+                registerStream('standalone-cam', localStream);
+            }
+
+            startOverlay.classList.add('hidden');
+            if (batterySaverEnabled) resetSleepTimer();
         }
 
         function switchRole(role) {

@@ -1,0 +1,945 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>Heimdall</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- PeerJS CDN -->
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        neutral: { 900: '#18181b', 950: '#09090b' }
+                    }
+                }
+            }
+        }
+    </script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        * {
+            box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            user-select: none;
+            -webkit-user-select: none;
+            touch-action: manipulation;
+            background-color: #050507;
+            overflow-x: hidden;
+        }
+
+        /* Meet style layouts */
+        .stage-grid-1 {
+            display: grid;
+            grid-template-columns: 1fr;
+            grid-template-rows: 1fr;
+            width: 100%;
+            height: 100%;
+        }
+        .stage-grid-2 {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            grid-template-rows: 1fr;
+            gap: 0.75rem;
+            width: 100%;
+            height: 100%;
+        }
+        @media (max-aspect-ratio: 1/1) {
+            .stage-grid-2 {
+                grid-template-columns: 1fr;
+                grid-template-rows: 1fr 1fr;
+            }
+        }
+        .stage-grid-3, .stage-grid-4 {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            grid-template-rows: 1fr 1fr;
+            gap: 0.75rem;
+            width: 100%;
+            height: 100%;
+        }
+
+        /* Spotlight Layout: Master on Left, Stacked on Right */
+        .stage-spotlight {
+            display: flex;
+            flex-direction: row;
+            gap: 0.75rem;
+            width: 100%;
+            height: 100%;
+        }
+        .stage-spotlight .spotlight-main {
+            flex: 1 1 78%;
+            height: 100%;
+            min-width: 0;
+        }
+        .stage-spotlight .spotlight-sidebar {
+            flex: 0 0 22%;
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+            height: 100%;
+            min-width: 180px;
+            max-width: 320px;
+            overflow-y: auto;
+        }
+        @media (max-aspect-ratio: 1/1) {
+            .stage-spotlight {
+                flex-direction: column;
+            }
+            .stage-spotlight .spotlight-main {
+                flex: 1 1 72%;
+            }
+            .stage-spotlight .spotlight-sidebar {
+                flex: 0 0 28%;
+                flex-direction: row;
+                min-width: 100%;
+                max-width: none;
+                overflow-x: auto;
+                overflow-y: hidden;
+            }
+            .stage-spotlight .spotlight-sidebar > div {
+                min-width: 140px;
+                height: 100%;
+            }
+        }
+
+        .tile-card {
+            background-color: #000;
+            border-radius: 1rem;
+            border: 1px solid #27272a;
+            position: relative;
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: border-color 0.15s ease;
+        }
+        .tile-card:hover {
+            border-color: #3f3f46;
+        }
+        .tile-card.is-spotlight {
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 1px #3b82f6;
+        }
+
+        /* Prevent flicker during canvas redraw */
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            background: #000;
+        }
+    </style>
+</head>
+<body class="text-zinc-100 min-h-screen flex flex-col">
+
+    <!-- Top Minimal Header Bar (Pinned with strict height h-12) -->
+    <header class="fixed top-0 inset-x-0 h-12 bg-zinc-950/90 backdrop-blur-md border-b border-zinc-800/60 px-4 z-40 flex items-center justify-between">
+        <div class="flex items-center space-x-3">
+            <div class="p-1.5 bg-zinc-900 border border-zinc-800 rounded-lg text-zinc-300">
+                <i data-lucide="video" class="w-4 h-4 text-emerald-400"></i>
+            </div>
+            <div>
+                <h1 class="font-bold text-sm tracking-wide leading-none" id="appBrandHeader">Heimdall</h1>
+                <p class="text-[10px] text-zinc-400 mt-0.5" id="roleSubheader">Display Mode</p>
+            </div>
+        </div>
+
+        <div class="flex items-center space-x-2">
+            <!-- Battery Saver (Camera Mode Only) -->
+            <div id="batterySaverControl" class="hidden items-center space-x-1.5 bg-zinc-900 border border-zinc-800 px-2.5 py-1 rounded-xl">
+                <span class="text-[10px] text-zinc-400">Dark</span>
+                <button id="batterySaverToggle" class="w-7 h-4 bg-zinc-800 rounded-full relative transition-colors duration-150 border border-zinc-700">
+                    <div id="batterySaverThumb" class="w-3 h-3 bg-zinc-400 rounded-full absolute top-0.5 left-0.5 transition-transform duration-150"></div>
+                </button>
+            </div>
+
+            <!-- Loop Beep Audio -->
+            <button id="audioToggleBtn" title="Toggle Sync Beep" class="p-2 bg-zinc-900 hover:bg-zinc-800 rounded-xl border border-zinc-800 text-zinc-300 transition">
+                <i id="audioIcon" data-lucide="volume-2" class="w-4 h-4"></i>
+            </button>
+
+            <!-- Reset Spotlight Layout Button -->
+            <button id="gridResetBtn" title="Tile View" class="p-2 bg-zinc-900 hover:bg-zinc-800 rounded-xl border border-zinc-800 text-zinc-300 transition">
+                <i data-lucide="grid" class="w-4 h-4"></i>
+            </button>
+
+            <!-- Switch Role -->
+            <button id="switchRoleBtn" title="Switch Mode" class="p-2 bg-zinc-900 hover:bg-zinc-800 rounded-xl border border-zinc-800 text-zinc-300 flex items-center space-x-1.5 transition">
+                <i data-lucide="arrow-left-right" class="w-4 h-4 text-zinc-400"></i>
+                <span class="text-xs hidden sm:inline">Role</span>
+            </button>
+
+            <!-- Fullscreen All -->
+            <button id="fullscreenBtn" title="Fullscreen Page" class="p-2 bg-zinc-900 hover:bg-zinc-800 rounded-xl border border-zinc-800 text-zinc-300 transition">
+                <i data-lucide="maximize" class="w-4 h-4"></i>
+            </button>
+        </div>
+    </header>
+
+    <!-- Stage Container: starts cleanly below the header (mt-12) and computes exact remaining height -->
+    <main class="relative w-full h-[calc(100dvh-3rem)] mt-12 bg-black flex flex-col justify-center items-center overflow-hidden p-2 sm:p-3 pb-12">
+
+        <!-- Live Layout Wrapper -->
+        <div id="stageContainer" class="w-full h-full relative">
+            <div id="gridWrapper" class="stage-grid-1">
+                <!-- Dynamically injected camera cards -->
+            </div>
+        </div>
+
+        <!-- Float Notification / Status Badges -->
+        <div class="absolute top-4 left-4 flex items-center gap-2 z-20 pointer-events-none">
+            <div id="streamBadge" class="flex items-center space-x-2 px-2.5 py-1 bg-zinc-950/80 text-zinc-300 border border-zinc-800/80 rounded-full text-[10px] font-bold uppercase tracking-wider backdrop-blur-md">
+                <span id="streamStatusDot" class="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>
+                <span id="streamStatusText">Waiting</span>
+            </div>
+
+            <div id="delayBadge" class="flex items-center space-x-1 px-2.5 py-1 bg-zinc-950/80 text-zinc-300 border border-zinc-800/80 rounded-full text-[10px] font-mono backdrop-blur-md">
+                <i data-lucide="clock" class="w-3 h-3 text-zinc-400"></i>
+                <span id="delayBadgeText">7.0s</span>
+            </div>
+        </div>
+
+        <!-- Audio Sync Ping Visual Flash -->
+        <div id="visualCue" class="absolute top-4 right-4 z-20 pointer-events-none opacity-0 transition-opacity duration-150">
+            <div class="w-3 h-3 rounded-full bg-white shadow-[0_0_12px_rgba(255,255,255,1)] animate-ping"></div>
+        </div>
+
+        <!-- Auto Dark Blank Sleep Layer (Camera role only) -->
+        <div id="blackSleepScreen" class="absolute inset-0 bg-black z-40 flex flex-col items-center justify-center text-zinc-600 opacity-0 pointer-events-none transition-opacity duration-200">
+            <div class="text-center space-y-1">
+                <div class="w-2 h-2 rounded-full bg-emerald-500 animate-ping mx-auto mb-2"></div>
+                <p class="text-[11px] font-mono tracking-widest uppercase text-zinc-500">Camera Transmitting</p>
+                <p class="text-[10px] text-zinc-700">Tap to wake screen</p>
+            </div>
+        </div>
+
+        <!-- Start / Permission Prompt Modal -->
+        <div id="startOverlay" class="absolute inset-0 bg-zinc-950/90 backdrop-blur-md flex flex-col items-center justify-center p-6 text-center z-30 space-y-4">
+            <div class="p-3 bg-zinc-900 border border-zinc-800 rounded-2xl text-zinc-300 shadow-xl">
+                <i data-lucide="tv" class="w-7 h-7 text-zinc-400"></i>
+            </div>
+            <h2 id="startOverlayTitle" class="text-lg font-bold tracking-tight text-zinc-100">Display Terminal Ready</h2>
+            <p id="startOverlayDesc" class="text-xs text-zinc-400 max-w-xs leading-relaxed">
+                Connect up to 4 camera devices using the 4-digit code.
+            </p>
+            <button id="initActionBtn" class="px-5 py-2.5 bg-zinc-100 hover:bg-white text-zinc-950 font-bold rounded-xl shadow-lg transition flex items-center space-x-2 text-xs">
+                <i data-lucide="play" class="w-3.5 h-3.5"></i>
+                <span id="initActionText">Start Display</span>
+            </button>
+        </div>
+
+        <!-- Bottom Quick Floating Nav -->
+        <div class="absolute bottom-3 z-20 flex items-center space-x-2 bg-zinc-950/80 border border-zinc-800/80 backdrop-blur-md px-3 py-1.5 rounded-2xl shadow-2xl">
+            <button id="freezeToggleBtn" class="p-1.5 hover:bg-zinc-800 text-zinc-200 rounded-lg text-xs flex items-center space-x-1.5 transition">
+                <i id="freezeIcon" data-lucide="pause" class="w-3.5 h-3.5"></i>
+                <span id="freezeText" class="text-[11px] font-semibold">Freeze</span>
+            </button>
+            <div class="h-3 w-[1px] bg-zinc-800"></div>
+            <button id="clearBufferQuickBtn" class="p-1.5 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 rounded-lg text-xs transition" title="Clear Lag Buffer">
+                <i data-lucide="rotate-ccw" class="w-3.5 h-3.5"></i>
+            </button>
+            <div class="h-3 w-[1px] bg-zinc-800"></div>
+            <a href="#controlSection" class="p-1.5 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 rounded-lg text-xs flex items-center space-x-1 transition">
+                <i data-lucide="sliders" class="w-3.5 h-3.5"></i>
+                <span class="text-[11px]">Settings</span>
+                <i data-lucide="chevron-down" class="w-3 h-3"></i>
+            </a>
+        </div>
+    </main>
+
+    <!-- Settings & Pair Dashboard (Scroll Down) -->
+    <section id="controlSection" class="w-full max-w-4xl mx-auto px-4 py-8 space-y-6">
+
+        <!-- Pairing Card -->
+        <div class="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 shadow-xl flex flex-col md:flex-row items-center justify-between gap-4">
+            <div class="space-y-1 text-center md:text-left">
+                <span class="text-[10px] font-bold uppercase tracking-wider text-zinc-500">Pairing Code</span>
+                <div class="flex items-center space-x-2 justify-center md:justify-start">
+                    <span id="peerIdDisplay" class="font-mono text-2xl font-bold tracking-widest text-zinc-100">----</span>
+                    <button id="copyCodeBtn" class="p-1.5 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 rounded-lg text-xs" title="Copy">
+                        <i data-lucide="copy" class="w-3.5 h-3.5"></i>
+                    </button>
+                </div>
+                <p class="text-[11px] text-zinc-400" id="connectedCounter">Connected: 0 / 4 cameras</p>
+            </div>
+
+            <!-- Cam node input to connect to display -->
+            <div id="cameraConnectForm" class="hidden flex items-center space-x-2 w-full md:w-auto">
+                <input type="text" id="targetPeerIdInput" placeholder="Display Code" class="bg-zinc-950 border border-zinc-800 text-zinc-100 text-sm font-mono rounded-xl px-3 py-2 uppercase tracking-widest w-40 focus:outline-none focus:border-zinc-600">
+                <button id="connectToDisplayBtn" class="px-4 py-2 bg-zinc-100 hover:bg-white text-zinc-950 font-bold rounded-xl text-xs transition flex items-center space-x-1">
+                    <i data-lucide="link" class="w-3.5 h-3.5"></i>
+                    <span>Connect</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- Buffer Slider & Delay Presets -->
+        <div id="delaySettingsCard" class="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 space-y-4 shadow-xl">
+            <div class="flex items-center justify-between">
+                <label for="delayRange" class="text-sm font-semibold flex items-center space-x-2 text-zinc-200">
+                    <i data-lucide="hourglass" class="w-4 h-4 text-zinc-400"></i>
+                    <span>Playback Delay</span>
+                </label>
+                <span id="delayDisplay" class="font-mono text-sm font-bold bg-zinc-950 px-3 py-1 rounded-lg border border-zinc-800 text-zinc-100">7.0s</span>
+            </div>
+
+            <input type="range" id="delayRange" min="1" max="25" step="0.5" value="7" class="w-full h-2 bg-zinc-950 rounded-lg appearance-none cursor-pointer accent-zinc-400 focus:outline-none">
+
+            <div class="flex items-center justify-between gap-2 pt-1 flex-wrap">
+                <span class="text-xs text-zinc-500 font-medium">Presets:</span>
+                <div class="flex items-center gap-2">
+                    <button data-preset="3" class="preset-btn px-3 py-1 bg-zinc-950 hover:bg-zinc-800 text-xs font-semibold rounded-lg border border-zinc-800 text-zinc-300 transition">3s</button>
+                    <button data-preset="7" class="preset-btn px-3 py-1 bg-zinc-800 text-xs font-semibold rounded-lg border border-zinc-700 text-zinc-100 transition">7s</button>
+                    <button data-preset="12" class="preset-btn px-3 py-1 bg-zinc-950 hover:bg-zinc-800 text-xs font-semibold rounded-lg border border-zinc-800 text-zinc-300 transition">12s</button>
+                    <button data-preset="18" class="preset-btn px-3 py-1 bg-zinc-950 hover:bg-zinc-800 text-xs font-semibold rounded-lg border border-zinc-800 text-zinc-300 transition">18s</button>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-2 gap-3 pt-3 border-t border-zinc-800/80">
+                <button id="mirrorToggleBtn" class="flex items-center justify-center space-x-2 p-2.5 bg-zinc-950 hover:bg-zinc-800 text-zinc-300 rounded-xl border border-zinc-800 text-xs font-medium transition">
+                    <i data-lucide="flip-horizontal" class="w-4 h-4 text-zinc-400"></i>
+                    <span id="mirrorText">Mirror: On</span>
+                </button>
+                <button id="flipCamBtn" class="hidden flex items-center justify-center space-x-2 p-2.5 bg-zinc-950 hover:bg-zinc-800 text-zinc-300 rounded-xl border border-zinc-800 text-xs font-medium transition">
+                    <i data-lucide="refresh-cw" class="w-4 h-4 text-zinc-400"></i>
+                    <span>Flip Camera</span>
+                </button>
+            </div>
+        </div>
+    </section>
+
+    <!-- Role Switcher Modal -->
+    <div id="roleSelectorModal" class="fixed inset-0 bg-zinc-950/95 backdrop-blur-md z-50 flex items-center justify-center p-4">
+        <div class="bg-zinc-900 border border-zinc-800 rounded-3xl max-w-sm w-full p-6 space-y-4 shadow-2xl">
+            <div class="text-center space-y-1">
+                <h2 class="text-lg font-bold text-zinc-100">Select Mode</h2>
+                <p class="text-xs text-zinc-400">How will this device operate?</p>
+            </div>
+
+            <div class="space-y-2.5">
+                <button id="roleSelectDisplay" class="w-full flex items-center p-3.5 bg-zinc-950/60 hover:bg-zinc-800/80 border border-zinc-800 rounded-2xl transition space-x-3 text-left">
+                    <div class="p-2.5 bg-zinc-900 text-zinc-200 rounded-xl border border-zinc-800">
+                        <i data-lucide="layout-grid" class="w-5 h-5 text-emerald-400"></i>
+                    </div>
+                    <div>
+                        <h3 class="font-bold text-xs text-zinc-100">Display Station</h3>
+                        <p class="text-[11px] text-zinc-400">Multi-cam delayed tile station.</p>
+                    </div>
+                </button>
+
+                <button id="roleSelectCamera" class="w-full flex items-center p-3.5 bg-zinc-950/60 hover:bg-zinc-800/80 border border-zinc-800 rounded-2xl transition space-x-3 text-left">
+                    <div class="p-2.5 bg-zinc-900 text-zinc-200 rounded-xl border border-zinc-800">
+                        <i data-lucide="camera" class="w-5 h-5 text-blue-400"></i>
+                    </div>
+                    <div>
+                        <h3 class="font-bold text-xs text-zinc-100">Camera Node</h3>
+                        <p class="text-[11px] text-zinc-400">Streams camera to the display.</p>
+                    </div>
+                </button>
+
+                <button id="roleSelectStandalone" class="w-full flex items-center p-3.5 bg-zinc-950/60 hover:bg-zinc-800/80 border border-zinc-800 rounded-2xl transition space-x-3 text-left">
+                    <div class="p-2.5 bg-zinc-900 text-zinc-200 rounded-xl border border-zinc-800">
+                        <i data-lucide="smartphone" class="w-5 h-5 text-purple-400"></i>
+                    </div>
+                    <div>
+                        <h3 class="font-bold text-xs text-zinc-100">Standalone</h3>
+                        <p class="text-[11px] text-zinc-400">Single phone camera delay loop.</p>
+                    </div>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Clean Footer -->
+    <footer class="mt-auto py-4 border-t border-zinc-900/80 text-center text-[11px] text-zinc-600">
+        <p><span id="appBrandFooter">Heimdall</span> • Adaptive Video Feedback</p>
+    </footer>
+
+    <script>
+        // ==========================================
+        // SYSTEM CONFIGURATION
+        // ==========================================
+        const CONFIG = {
+            BRAND_NAME: 'Heimdall',
+            MAX_CAMERAS: 4,
+            TARGET_FPS: 30,
+            AUTO_SLEEP_MS: 4000
+        };
+
+        // Brand injection
+        document.title = CONFIG.BRAND_NAME;
+        document.getElementById('appBrandHeader').textContent = CONFIG.BRAND_NAME;
+        document.getElementById('appBrandFooter').textContent = CONFIG.BRAND_NAME;
+
+        // Elements
+        const stageContainer = document.getElementById('stageContainer');
+        const roleSelectorModal = document.getElementById('roleSelectorModal');
+        const roleSubheader = document.getElementById('roleSubheader');
+        const peerIdDisplay = document.getElementById('peerIdDisplay');
+        const connectedCounter = document.getElementById('connectedCounter');
+        const targetPeerIdInput = document.getElementById('targetPeerIdInput');
+        const cameraConnectForm = document.getElementById('cameraConnectForm');
+        const connectToDisplayBtn = document.getElementById('connectToDisplayBtn');
+        const streamStatusDot = document.getElementById('streamStatusDot');
+        const streamStatusText = document.getElementById('streamStatusText');
+        const delayRange = document.getElementById('delayRange');
+        const delayDisplay = document.getElementById('delayDisplay');
+        const delayBadgeText = document.getElementById('delayBadgeText');
+        const freezeToggleBtn = document.getElementById('freezeToggleBtn');
+        const freezeIcon = document.getElementById('freezeIcon');
+        const freezeText = document.getElementById('freezeText');
+        const mirrorToggleBtn = document.getElementById('mirrorToggleBtn');
+        const mirrorText = document.getElementById('mirrorText');
+        const flipCamBtn = document.getElementById('flipCamBtn');
+        const clearBufferQuickBtn = document.getElementById('clearBufferQuickBtn');
+        const startOverlay = document.getElementById('startOverlay');
+        const initActionBtn = document.getElementById('initActionBtn');
+        const initActionText = document.getElementById('initActionText');
+        const startOverlayTitle = document.getElementById('startOverlayTitle');
+        const startOverlayDesc = document.getElementById('startOverlayDesc');
+        const batterySaverControl = document.getElementById('batterySaverControl');
+        const batterySaverToggle = document.getElementById('batterySaverToggle');
+        const batterySaverThumb = document.getElementById('batterySaverThumb');
+        const blackSleepScreen = document.getElementById('blackSleepScreen');
+        const visualCue = document.getElementById('visualCue');
+        const gridResetBtn = document.getElementById('gridResetBtn');
+
+        // State
+        let currentRole = 'display';
+        let peer = null;
+        let myPeerId = '';
+        let localStream = null;
+        let isPlaying = true;
+        let isMirrored = true;
+        let facingMode = 'environment';
+        let delaySeconds = parseFloat(delayRange.value);
+        let audioCueEnabled = true;
+        let batterySaverEnabled = false;
+        let sleepTimer = null;
+        let spotlightTileId = null;
+
+        // Tile Store: id -> { id, stream, videoEl, canvasEl, ctx, frameBuffer, lastPushTime, cardEl }
+        const streams = new Map();
+
+        // Audio Engine
+        let audioCtx = null;
+        let audioInterval = null;
+
+        function initAudio() {
+            if (!audioCtx) {
+                const AudioClass = window.AudioContext || window.webkitAudioContext;
+                if (AudioClass) audioCtx = new AudioClass();
+            }
+            if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+        }
+
+        function playBeep(freq = 880, duration = 0.1) {
+            if (!audioCueEnabled) return;
+            try {
+                initAudio();
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+                gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+                osc.start();
+                osc.stop(audioCtx.currentTime + duration);
+            } catch (e) {}
+        }
+
+        function triggerSyncCue() {
+            visualCue.classList.remove('opacity-0');
+            visualCue.classList.add('opacity-100');
+            playBeep(880, 0.08);
+            setTimeout(() => {
+                visualCue.classList.remove('opacity-100');
+                visualCue.classList.add('opacity-0');
+            }, 200);
+        }
+
+        function syncTimerLoop() {
+            if (audioInterval) clearInterval(audioInterval);
+            if (currentRole !== 'camera' && delaySeconds > 0) {
+                audioInterval = setInterval(() => {
+                    if (isPlaying && streams.size > 0) triggerSyncCue();
+                }, delaySeconds * 1000);
+            }
+        }
+
+        function genCode() {
+            return Math.floor(1000 + Math.random() * 9000).toString();
+        }
+
+        // ==========================================
+        // PEER CONNECTION
+        // ==========================================
+        function initPeer() {
+            const code = genCode();
+            myPeerId = `hmdl-${code}`;
+            peerIdDisplay.textContent = code;
+
+            peer = new Peer(myPeerId, { debug: 1 });
+
+            peer.on('call', (call) => {
+                if (currentRole !== 'display') return;
+                if (streams.size >= CONFIG.MAX_CAMERAS) {
+                    call.close();
+                    return;
+                }
+                call.answer();
+                call.on('stream', (remoteStream) => {
+                    registerStream(call.peer, remoteStream);
+                });
+                call.on('close', () => {
+                    unregisterStream(call.peer);
+                });
+            });
+
+            peer.on('error', (e) => console.warn(e));
+        }
+
+        function connectToDisplay(code) {
+            if (!localStream) {
+                alert("Enable camera first");
+                return;
+            }
+            const targetId = `hmdl-${code.trim()}`;
+            peer.call(targetId, localStream);
+            streamStatusDot.className = "w-2 h-2 rounded-full bg-emerald-500";
+            streamStatusText.textContent = "Streaming Live";
+        }
+
+        // ==========================================
+        // LAYOUT ENGINE (MEET STYLE TILES)
+        // ==========================================
+        function rebuildStageLayout() {
+            stageContainer.innerHTML = '';
+            const count = streams.size;
+
+            connectedCounter.textContent = `Connected: ${count} / ${CONFIG.MAX_CAMERAS} cameras`;
+
+            if (count === 0) return;
+
+            // Single Spotlight Mode Active
+            if (spotlightTileId && streams.has(spotlightTileId)) {
+                const spotlightWrapper = document.createElement('div');
+                spotlightWrapper.className = 'stage-spotlight';
+
+                const mainSection = document.createElement('div');
+                mainSection.className = 'spotlight-main';
+
+                const sideSection = document.createElement('div');
+                sideSection.className = 'spotlight-sidebar';
+
+                streams.forEach((item, id) => {
+                    if (id === spotlightTileId) {
+                        item.cardEl.classList.add('is-spotlight');
+                        mainSection.appendChild(item.cardEl);
+                    } else {
+                        item.cardEl.classList.remove('is-spotlight');
+                        sideSection.appendChild(item.cardEl);
+                    }
+                });
+
+                spotlightWrapper.appendChild(mainSection);
+                if (count > 1) {
+                    spotlightWrapper.appendChild(sideSection);
+                }
+                stageContainer.appendChild(spotlightWrapper);
+            } else {
+                // Regular Equal Grid Mode
+                const gridWrapper = document.createElement('div');
+                gridWrapper.className = `stage-grid-${count > 4 ? 4 : (count === 0 ? 1 : count)}`;
+
+                streams.forEach((item) => {
+                    item.cardEl.classList.remove('is-spotlight');
+                    gridWrapper.appendChild(item.cardEl);
+                });
+
+                stageContainer.appendChild(gridWrapper);
+            }
+
+            // Sync layout icons
+            lucide.createIcons();
+        }
+
+        function registerStream(id, stream) {
+            if (streams.has(id)) return;
+
+            const video = document.createElement('video');
+            video.srcObject = stream;
+            video.autoplay = true;
+            video.playsInline = true;
+            video.muted = true;
+
+            const card = document.createElement('div');
+            card.id = `card-${id}`;
+            card.className = "tile-card group";
+
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d', { alpha: false }); // alpha false prevents canvas flickering
+
+            // Tile Header Bar (Camera Tag + Fullscreen Button)
+            const tileControls = document.createElement('div');
+            tileControls.className = "absolute top-2 inset-x-2 flex items-center justify-between z-10 pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity";
+
+            const tag = document.createElement('span');
+            tag.className = "px-2 py-0.5 rounded-md bg-zinc-950/80 backdrop-blur-sm border border-zinc-800 text-[10px] font-mono font-bold text-zinc-300";
+            tag.textContent = `CAM ${streams.size + 1}`;
+
+            const fsBtn = document.createElement('button');
+            fsBtn.className = "p-1.5 rounded-lg bg-zinc-950/80 backdrop-blur-sm border border-zinc-800 text-zinc-300 hover:text-white pointer-events-auto transition";
+            fsBtn.title = "Fullscreen This Feed";
+            fsBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>`;
+
+            fsBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                if (!document.fullscreenElement) {
+                    if (card.requestFullscreen) card.requestFullscreen();
+                    else if (card.webkitRequestFullscreen) card.webkitRequestFullscreen();
+                } else {
+                    document.exitFullscreen();
+                }
+            });
+
+            tileControls.appendChild(tag);
+            tileControls.appendChild(fsBtn);
+
+            card.appendChild(canvas);
+            card.appendChild(tileControls);
+
+            // Click tile to Spotlight
+            card.addEventListener('click', () => {
+                spotlightTileId = (spotlightTileId === id) ? null : id;
+                rebuildStageLayout();
+            });
+
+            streams.set(id, {
+                id,
+                stream,
+                videoEl: video,
+                canvasEl: canvas,
+                ctx,
+                cardEl: card,
+                frameBuffer: [],
+                lastPushTime: performance.now(),
+                lastDrawnFrame: null
+            });
+
+            streamStatusDot.className = "w-2 h-2 rounded-full bg-emerald-500";
+            streamStatusText.textContent = `${streams.size} Live`;
+            startOverlay.classList.add('hidden');
+
+            rebuildStageLayout();
+            syncTimerLoop();
+        }
+
+        function unregisterStream(id) {
+            const item = streams.get(id);
+            if (item) {
+                item.cardEl.remove();
+                streams.delete(id);
+            }
+            if (spotlightTileId === id) spotlightTileId = null;
+            rebuildStageLayout();
+
+            if (streams.size === 0) {
+                streamStatusDot.className = "w-2 h-2 rounded-full bg-amber-500 animate-pulse";
+                streamStatusText.textContent = "Waiting";
+            }
+        }
+
+        // ==========================================
+        // FLICKER-FREE RENDER ENGINE
+        // ==========================================
+        function paintFrame(ctx, canvas, source, mirror) {
+            const srcW = source.videoWidth || source.width;
+            const srcH = source.videoHeight || source.height;
+            if (!srcW || !srcH) return;
+
+            // Match internal buffer to actual rendered CSS dimensions
+            const dw = canvas.clientWidth;
+            const dh = canvas.clientHeight;
+            if (canvas.width !== dw || canvas.height !== dh) {
+                canvas.width = dw;
+                canvas.height = dh;
+            }
+
+            const hRatio = dw / srcW;
+            const vRatio = dh / srcH;
+            const scale = Math.min(hRatio, vRatio);
+
+            const fitW = srcW * scale;
+            const fitH = srcH * scale;
+            const dx = (dw - fitW) / 2;
+            const dy = (dh - fitH) / 2;
+
+            ctx.save();
+            // Black fill only outside edges, directly overwriting
+            ctx.fillStyle = "#000000";
+            if (dx > 0) {
+                ctx.fillRect(0, 0, dx, dh);
+                ctx.fillRect(dx + fitW, 0, dx + 1, dh);
+            }
+            if (dy > 0) {
+                ctx.fillRect(0, 0, dw, dy);
+                ctx.fillRect(0, dy + fitH, dw, dy + 1);
+            }
+
+            if (mirror) {
+                ctx.translate(dw, 0);
+                ctx.scale(-1, 1);
+                const mirroredX = dw - (dx + fitW);
+                ctx.drawImage(source, mirroredX, dy, fitW, fitH);
+            } else {
+                ctx.drawImage(source, dx, dy, fitW, fitH);
+            }
+            ctx.restore();
+        }
+
+        function masterLoop(now) {
+            requestAnimationFrame(masterLoop);
+
+            streams.forEach((item) => {
+                const { videoEl, canvasEl, ctx, frameBuffer } = item;
+                if (!videoEl.videoWidth || !videoEl.videoHeight) return;
+
+                // Passthrough for camera node
+                if (currentRole === 'camera') {
+                    paintFrame(ctx, canvasEl, videoEl, false);
+                    return;
+                }
+
+                // Push new frames at capped FPS
+                const elapsed = now - item.lastPushTime;
+                if (elapsed >= (1000 / CONFIG.TARGET_FPS) - 1) {
+                    item.lastPushTime = now;
+                    if (isPlaying) {
+                        const off = document.createElement('canvas');
+                        off.width = videoEl.videoWidth;
+                        off.height = videoEl.videoHeight;
+                        const octx = off.getContext('2d');
+                        octx.drawImage(videoEl, 0, 0);
+                        frameBuffer.push(off);
+                    }
+                }
+
+                const targetFrames = Math.max(1, Math.round(delaySeconds * CONFIG.TARGET_FPS));
+
+                if (frameBuffer.length >= targetFrames) {
+                    const readyFrame = isPlaying ? frameBuffer.shift() : frameBuffer[0];
+                    item.lastDrawnFrame = readyFrame;
+                    paintFrame(ctx, canvasEl, readyFrame, isMirrored);
+                } else if (item.lastDrawnFrame) {
+                    // Keep displaying last valid frame without blinking to black
+                    paintFrame(ctx, canvasEl, item.lastDrawnFrame, isMirrored);
+                }
+            });
+        }
+
+        // ==========================================
+        // CAMERA HANDLING
+        // ==========================================
+        async function startLocalCamera() {
+            if (localStream) {
+                localStream.getTracks().forEach(t => t.stop());
+            }
+
+            try {
+                localStream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: facingMode, width: { ideal: 1920 }, height: { ideal: 1080 } },
+                    audio: false
+                });
+
+                if (currentRole === 'camera') {
+                    registerStream('local-cam', localStream);
+                } else if (currentRole === 'standalone') {
+                    registerStream('standalone-cam', localStream);
+                }
+
+                startOverlay.classList.add('hidden');
+                if (batterySaverEnabled) resetSleepTimer();
+            } catch (e) {
+                alert("Camera permission denied or camera unavailable.");
+            }
+        }
+
+        function switchRole(role) {
+            currentRole = role;
+            roleSelectorModal.classList.add('hidden');
+            streams.forEach((item) => unregisterStream(item.id));
+
+            if (role === 'camera') {
+                roleSubheader.textContent = 'Camera Node';
+                cameraConnectForm.classList.remove('hidden');
+                batterySaverControl.classList.remove('hidden');
+                batterySaverControl.classList.add('flex');
+                flipCamBtn.classList.remove('hidden');
+                startOverlayTitle.textContent = "Camera Ready";
+                startOverlayDesc.textContent = "Enable your camera and enter the display code.";
+                initActionText.textContent = "Start Camera";
+            } else if (role === 'display') {
+                roleSubheader.textContent = 'Display Station (Max 4)';
+                cameraConnectForm.classList.add('hidden');
+                batterySaverControl.classList.add('hidden');
+                flipCamBtn.classList.add('hidden');
+                startOverlayTitle.textContent = "Display Terminal";
+                startOverlayDesc.textContent = "Waiting for remote cameras to connect.";
+                initActionText.textContent = "Start Display";
+            } else {
+                roleSubheader.textContent = 'Standalone Loop';
+                cameraConnectForm.classList.add('hidden');
+                batterySaverControl.classList.add('hidden');
+                flipCamBtn.classList.remove('hidden');
+                startOverlayTitle.textContent = "Standalone Mode";
+                startOverlayDesc.textContent = "Single device video delay loop.";
+                initActionText.textContent = "Start Standalone";
+            }
+        }
+
+        // ==========================================
+        // AUTO-DARK BATTERY SAVER
+        // ==========================================
+        function resetSleepTimer() {
+            if (!batterySaverEnabled || currentRole !== 'camera') return;
+            blackSleepScreen.classList.remove('opacity-100', 'pointer-events-auto');
+            blackSleepScreen.classList.add('opacity-0', 'pointer-events-none');
+
+            if (sleepTimer) clearTimeout(sleepTimer);
+            sleepTimer = setTimeout(() => {
+                if (batterySaverEnabled && currentRole === 'camera') {
+                    blackSleepScreen.classList.remove('opacity-0', 'pointer-events-none');
+                    blackSleepScreen.classList.add('opacity-100', 'pointer-events-auto');
+                }
+            }, CONFIG.AUTO_SLEEP_MS);
+        }
+
+        batterySaverToggle.addEventListener('click', () => {
+            batterySaverEnabled = !batterySaverEnabled;
+            if (batterySaverEnabled) {
+                batterySaverToggle.classList.add('bg-zinc-200');
+                batterySaverThumb.classList.add('translate-x-3', 'bg-zinc-950');
+                resetSleepTimer();
+            } else {
+                batterySaverToggle.classList.remove('bg-zinc-200');
+                batterySaverThumb.classList.remove('translate-x-3', 'bg-zinc-950');
+                if (sleepTimer) clearTimeout(sleepTimer);
+                blackSleepScreen.classList.remove('opacity-100', 'pointer-events-auto');
+                blackSleepScreen.classList.add('opacity-0', 'pointer-events-none');
+            }
+        });
+
+        window.addEventListener('pointerdown', resetSleepTimer);
+
+        // ==========================================
+        // EVENT HANDLERS
+        // ==========================================
+        document.getElementById('roleSelectDisplay').addEventListener('click', () => switchRole('display'));
+        document.getElementById('roleSelectCamera').addEventListener('click', () => switchRole('camera'));
+        document.getElementById('roleSelectStandalone').addEventListener('click', () => switchRole('standalone'));
+        document.getElementById('switchRoleBtn').addEventListener('click', () => roleSelectorModal.classList.remove('hidden'));
+
+        initActionBtn.addEventListener('click', () => {
+            initAudio();
+            if (currentRole === 'camera' || currentRole === 'standalone') {
+                startLocalCamera();
+            } else {
+                startOverlay.classList.add('hidden');
+            }
+        });
+
+        connectToDisplayBtn.addEventListener('click', () => {
+            const code = targetPeerIdInput.value;
+            if (code) connectToDisplay(code);
+        });
+
+        document.getElementById('copyCodeBtn').addEventListener('click', () => {
+            navigator.clipboard.writeText(peerIdDisplay.textContent);
+        });
+
+        delayRange.addEventListener('input', (e) => {
+            delaySeconds = parseFloat(e.target.value);
+            delayDisplay.textContent = delaySeconds.toFixed(1) + 's';
+            delayBadgeText.textContent = delaySeconds.toFixed(1) + 's';
+            syncTimerLoop();
+        });
+
+        document.querySelectorAll('.preset-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.preset-btn').forEach(b => {
+                    b.classList.remove('bg-zinc-800', 'text-zinc-100');
+                    b.classList.add('bg-zinc-950', 'text-zinc-300');
+                });
+                btn.classList.remove('bg-zinc-950', 'text-zinc-300');
+                btn.classList.add('bg-zinc-800', 'text-zinc-100');
+
+                const val = parseFloat(btn.getAttribute('data-preset'));
+                delayRange.value = val;
+                delaySeconds = val;
+                delayDisplay.textContent = val.toFixed(1) + 's';
+                delayBadgeText.textContent = val.toFixed(1) + 's';
+                syncTimerLoop();
+            });
+        });
+
+        freezeToggleBtn.addEventListener('click', () => {
+            isPlaying = !isPlaying;
+            freezeText.textContent = isPlaying ? 'Freeze' : 'Resume';
+            freezeIcon.setAttribute('data-lucide', isPlaying ? 'pause' : 'play');
+            lucide.createIcons();
+        });
+
+        mirrorToggleBtn.addEventListener('click', () => {
+            isMirrored = !isMirrored;
+            mirrorText.textContent = isMirrored ? 'Mirror: On' : 'Mirror: Off';
+        });
+
+        flipCamBtn.addEventListener('click', () => {
+            facingMode = (facingMode === 'environment') ? 'user' : 'environment';
+            startLocalCamera();
+        });
+
+        clearBufferQuickBtn.addEventListener('click', () => {
+            streams.forEach(item => { item.frameBuffer = []; });
+        });
+
+        gridResetBtn.addEventListener('click', () => {
+            spotlightTileId = null;
+            rebuildStageLayout();
+        });
+
+        document.getElementById('fullscreenBtn').addEventListener('click', () => {
+            if (!document.fullscreenElement) {
+                document.documentElement.requestFullscreen().catch(() => {});
+            } else {
+                document.exitFullscreen().catch(() => {});
+            }
+        });
+
+        document.getElementById('audioToggleBtn').addEventListener('click', () => {
+            audioCueEnabled = !audioCueEnabled;
+            document.getElementById('audioIcon').setAttribute('data-lucide', audioCueEnabled ? 'volume-2' : 'volume-x');
+            lucide.createIcons();
+        });
+
+        window.addEventListener('DOMContentLoaded', () => {
+            lucide.createIcons();
+            initPeer();
+            requestAnimationFrame(masterLoop);
+        });
+    </script>
+</body>
+</html>
